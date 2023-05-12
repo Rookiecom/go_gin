@@ -95,3 +95,43 @@ func (actl *adviser_controller) AdviserHomePage(c *gin.Context) {
 	fmt.Println(home_page_inf)
 	c.JSON(http.StatusOK, home_page_inf)
 }
+func (actl *adviser_controller) AdviserInformationEdit(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	svc := domain.Svc
+	reqinput := &dynamodb.GetItemInput{
+		TableName: aws.String("adviser"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"phone_number": {S: aws.String(claim.PhoneNumber)},
+		},
+	}
+	reqoutput, _ := svc.GetItem(reqinput)
+	var inf domain.AdviserEdit
+	dynamodbattribute.UnmarshalMap(reqoutput.Item, &inf)
+	c.String(http.StatusOK, "修改以前的信息\n")
+	c.JSON(http.StatusOK, inf)
+	var update_req = &domain.AdviserRequestUpdate{
+		IsEdit:      false,
+		AdviserEdit: inf,
+	}
+	if ok := c.ShouldBindJSON(update_req); ok == nil {
+		fmt.Println(*update_req)
+		if update_req.IsEdit {
+			update_output, err := update_req.Update(claim.PhoneNumber)
+
+			if err == nil {
+				var new_inf domain.AdviserEdit
+				dynamodbattribute.UnmarshalMap(update_output.Attributes, &new_inf)
+				c.String(http.StatusOK, "\n修改以后的信息\n")
+				c.JSON(http.StatusOK, new_inf)
+			} else {
+				fmt.Println(err.Error())
+			}
+		} else {
+			fmt.Println("edit 传送失败")
+		}
+
+	} else {
+		c.String(http.StatusOK, ok.Error())
+	}
+}

@@ -3,7 +3,6 @@ package domain
 import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 )
 
 type Loginreq struct {
@@ -44,7 +43,6 @@ func UserDisEditInit() *UserDisEdit {
 	}
 }
 func (uru *UserRequestUpdate) Update(phone_number string) (*dynamodb.UpdateItemOutput, error) {
-	update_item, _ := dynamodbattribute.MarshalMap(&uru.UserEdit)
 	update_item_input := &dynamodb.UpdateItemInput{
 		TableName: aws.String("user"),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -52,14 +50,30 @@ func (uru *UserRequestUpdate) Update(phone_number string) (*dynamodb.UpdateItemO
 		},
 		UpdateExpression: aws.String("SET #na=:name,#bir=:birth,#gen=:gender,#bio=:bio,#ab=:about"),
 		ExpressionAttributeNames: map[string]*string{
-			"#na":  aws.String("name"),
+			"#ab":  aws.String("about"),
+			"#bio": aws.String("bio"),
 			"#bir": aws.String("birth"),
 			"#gen": aws.String("gender"),
-			"#bio": aws.String("bio"),
-			"#ab":  aws.String("about"),
+			"#na":  aws.String("name"),
 		},
-		ExpressionAttributeValues: update_item,
-		ReturnValues:              aws.String("ALL_NEW"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":name": {
+				S: aws.String(uru.Name),
+			},
+			":birth": {
+				S: aws.String(uru.Birth),
+			},
+			":bio": {
+				S: aws.String(uru.Bio),
+			},
+			":gender": {
+				S: aws.String(uru.Gender),
+			},
+			":about": {
+				S: aws.String(uru.About),
+			},
+		},
+		ReturnValues: aws.String("ALL_NEW"),
 	}
 	return Svc.UpdateItem(update_item_input)
 

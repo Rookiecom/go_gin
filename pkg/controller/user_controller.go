@@ -96,22 +96,42 @@ func (uctl *user_controller) UserHomePage(c *gin.Context) {
 	var home_page_inf domain.UserHomePage
 	dynamodbattribute.UnmarshalMap(reqoutput.Item, &home_page_inf)
 	c.JSON(http.StatusOK, home_page_inf)
-	var update_req = &domain.UserRequestUpdate{}
-	if ok := c.ShouldBind(update_req); ok == nil {
+}
+func (uctl *user_controller) UserInformationEdit(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	svc := domain.Svc
+	reqinput := &dynamodb.GetItemInput{
+		TableName: aws.String("user"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"phone_number": {S: aws.String(claim.PhoneNumber)},
+		},
+	}
+	reqoutput, _ := svc.GetItem(reqinput)
+	var inf domain.UserEdit
+	dynamodbattribute.UnmarshalMap(reqoutput.Item, &inf)
+	c.String(http.StatusOK, "修改以前的信息\n")
+	c.JSON(http.StatusOK, inf)
+	var update_req = &domain.UserRequestUpdate{
+		IsEdit:   false,
+		UserEdit: inf,
+	}
+	if ok := c.ShouldBindJSON(update_req); ok == nil {
 		fmt.Println(*update_req)
 		if update_req.IsEdit {
 			update_output, err := update_req.Update(claim.PhoneNumber)
 
 			if err == nil {
-				var new_home_page domain.UserHomePage
-				dynamodbattribute.UnmarshalMap(update_output.Attributes, new_home_page)
-				c.JSON(http.StatusOK, new_home_page)
+				var new_inf domain.UserEdit
+				dynamodbattribute.UnmarshalMap(update_output.Attributes, &new_inf)
+				c.String(http.StatusOK, "\n修改以后的信息\n")
+				c.JSON(http.StatusOK, new_inf)
 			} else {
-				c.String(http.StatusOK, "数据转换失败")
+				fmt.Println(err.Error())
 			}
 		}
 	} else {
-		c.String(http.StatusOK, "表单传递失败")
+		c.String(http.StatusOK, ok.Error())
 	}
 }
 func generateToken(c *gin.Context, roleid string, phone_number string, ExpireTimeByMinute int) {
