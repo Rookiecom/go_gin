@@ -11,10 +11,11 @@ type AdviserEdit struct {
 }
 
 type AdviserDisEdit struct {
-	Coin       int `json:"coin" dynamodbbav:"coin"`
-	OrderNum   int `json:"ordernum" dynamodbbav:"ordernum"`
-	Score      int `json:"score" dynamodbbav:"score"`
-	CommentNum int `json:"commentnum" dynamodbbav:"commentnum"`
+	Coin       int    `json:"coin" dynamodbbav:"coin"`
+	OrderNum   int    `json:"ordernum" dynamodbbav:"ordernum"`
+	Score      int    `json:"score" dynamodbbav:"score"`
+	CommentNum int    `json:"commentnum" dynamodbbav:"commentnum"`
+	Uuid       string `json:"uuid" dynamodbav:"uuid"`
 }
 type AdviserRequest struct {
 	Loginreq
@@ -31,15 +32,6 @@ type AdviserHomePage struct {
 type AdviserRequestUpdate struct {
 	IsEdit bool `json:"is_edit" dynamodbbav:"is_edit"`
 	AdviserEdit
-}
-
-func AdviserDisEditInit() *AdviserDisEdit {
-	return &AdviserDisEdit{
-		Coin:       0,
-		OrderNum:   0,
-		Score:      0,
-		CommentNum: 0,
-	}
 }
 func (aru *AdviserRequestUpdate) Update(phone_number string) (*dynamodb.UpdateItemOutput, error) {
 	update_item_input := &dynamodb.UpdateItemInput{

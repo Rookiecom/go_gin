@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"k8s.io/klog"
 )
 
@@ -25,19 +26,22 @@ func NewUserController() *user_controller {
 }
 func (uctl *user_controller) UserRegister(c *gin.Context) {
 	klog.Infof("user register")
-
+	newuuid, _ := uuid.NewRandom()
 	var userreq domain.UserRequest
 	c.String(200, "请填写以下信息完成用户注册\n")
 	c.String(200, "phone_number password name birth gender bio about\n")
 	user_register := domain.UserRegister{
 		UserRequest: userreq,
-		UserDisEdit: *domain.UserDisEditInit(),
+		UserDisEdit: *&domain.UserDisEdit{
+			Coin: 0,
+			Uuid: newuuid.String(),
+		},
 	}
 	c.ShouldBindJSON(&user_register)
 	useritem, _ := dynamodbattribute.MarshalMap(user_register)
 	useriteminput := &dynamodb.PutItemInput{
 		Item:      useritem,
-		TableName: aws.String("user"),
+		TableName: aws.String("user_info"),
 	}
 	svc := domain.Svc
 	_, err := svc.PutItem(useriteminput)
@@ -46,6 +50,18 @@ func (uctl *user_controller) UserRegister(c *gin.Context) {
 	} else {
 		c.String(http.StatusOK, "注册失败"+err.Error())
 	}
+
+	id_table := domain.IdTable{
+		Uuid:        newuuid.String(),
+		Type:        "user",
+		PhoneNumber: user_register.PhoneNumber,
+	}
+	id_table_item, _ := dynamodbattribute.MarshalMap(id_table)
+	id_table_input := &dynamodb.PutItemInput{
+		Item:      id_table_item,
+		TableName: aws.String("all_id"),
+	}
+	svc.PutItem(id_table_input)
 }
 func (uctl *user_controller) UserLogin(c *gin.Context) {
 	klog.Infof("user login for token")
@@ -58,7 +74,7 @@ func (uctl *user_controller) UserLogin(c *gin.Context) {
 			Key: map[string]*dynamodb.AttributeValue{
 				"phone_number": {S: aws.String(loginreq.PhoneNumber)},
 			},
-			TableName: aws.String("user"),
+			TableName: aws.String("user_info"),
 		}
 		reqoutput, loginerr := svc.GetItem(reqinput)
 		if loginerr == nil && reqoutput != nil {
@@ -87,7 +103,7 @@ func (uctl *user_controller) UserHomePage(c *gin.Context) {
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
-		TableName: aws.String("user"),
+		TableName: aws.String("user_info"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"phone_number": {S: aws.String(claim.PhoneNumber)},
 		},
@@ -102,7 +118,7 @@ func (uctl *user_controller) UserInformationEdit(c *gin.Context) {
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
-		TableName: aws.String("user"),
+		TableName: aws.String("user_info"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"phone_number": {S: aws.String(claim.PhoneNumber)},
 		},
@@ -133,6 +149,46 @@ func (uctl *user_controller) UserInformationEdit(c *gin.Context) {
 	} else {
 		c.String(http.StatusOK, ok.Error())
 	}
+}
+func (uctl *user_controller) GetAdviserList(c *gin.Context) {
+	input := &dynamodb.ScanInput{
+		TableName:            aws.String("adviser_info"),
+		ProjectionExpression: aws.String("#phone, #name, #uuid"),
+		ExpressionAttributeNames: map[string]*string{
+			"#phone": aws.String("phone_number"),
+			"#name":  aws.String("name"),
+			"#uuid":  aws.String("uuid"),
+		},
+	}
+	svc := domain.Svc
+	result, _ := svc.Scan(input)
+	for _, item := range result.Items {
+		c.String(http.StatusOK, "name:"+*item["name"].S+"  uuid:"+*item["uuid"].S+"\n")
+	}
+
+}
+func (uctl *user_controller) VisitAdviser(c *gin.Context) {
+	adviserid := c.Query("uuid")
+	phonereq := &dynamodb.GetItemInput{
+		TableName: aws.String("all_id"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"uuid": {S: aws.String(adviserid)},
+			"type": {S: aws.String("adviser")},
+		},
+	}
+	svc := domain.Svc
+	result, _ := svc.GetItem(phonereq)
+	reqinput := &dynamodb.GetItemInput{
+		TableName: aws.String("adviser_info"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"phone_number": {S: aws.String(*result.Item["phone_number"].S)},
+		},
+	}
+	reqoutput, _ := svc.GetItem(reqinput)
+	var home_page_inf domain.AdviserHomePage
+	dynamodbattribute.UnmarshalMap(reqoutput.Item, &home_page_inf)
+	c.JSON(http.StatusOK, home_page_inf)
+
 }
 func generateToken(c *gin.Context, roleid string, phone_number string, ExpireTimeByMinute int) {
 	j := myjwt.NewJwt()

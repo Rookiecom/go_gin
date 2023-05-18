@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"k8s.io/klog"
 )
 
@@ -22,18 +23,25 @@ func NewAdviserController() *adviser_controller {
 }
 func (actl *adviser_controller) AdviserRegister(c *gin.Context) {
 	klog.Infof("adviser register")
+	newuuid, _ := uuid.NewRandom()
 	c.String(http.StatusOK, "请输入以下信息完成顾问注册\n"+
 		"phone_number password name  coin workstate ordernum score commentnum\n")
 	var adviser_request domain.AdviserRequest
 	c.ShouldBindJSON(&adviser_request)
 	adviser_register := domain.AdviserRegister{
 		AdviserRequest: adviser_request,
-		AdviserDisEdit: *domain.AdviserDisEditInit(),
+		AdviserDisEdit: domain.AdviserDisEdit{
+			Coin:       0,
+			OrderNum:   0,
+			Score:      0,
+			CommentNum: 0,
+			Uuid:       newuuid.String(),
+		},
 	}
 	adviser_item, _ := dynamodbattribute.MarshalMap(adviser_register)
 	adviser_item_input := &dynamodb.PutItemInput{
 		Item:      adviser_item,
-		TableName: aws.String("adviser"),
+		TableName: aws.String("adviser_info"),
 	}
 	svc := domain.Svc
 	_, err := svc.PutItem(adviser_item_input)
@@ -42,6 +50,18 @@ func (actl *adviser_controller) AdviserRegister(c *gin.Context) {
 	} else {
 		c.String(http.StatusOK, "注册失败"+err.Error())
 	}
+
+	id_table := domain.IdTable{
+		Uuid:        newuuid.String(),
+		Type:        "adviser",
+		PhoneNumber: adviser_request.PhoneNumber,
+	}
+	id_table_item, _ := dynamodbattribute.MarshalMap(id_table)
+	id_table_input := &dynamodb.PutItemInput{
+		Item:      id_table_item,
+		TableName: aws.String("all_id"),
+	}
+	svc.PutItem(id_table_input)
 }
 func (actl *adviser_controller) AdviserLogin(c *gin.Context) {
 	klog.Infof("adviser login for token")
@@ -54,7 +74,7 @@ func (actl *adviser_controller) AdviserLogin(c *gin.Context) {
 			Key: map[string]*dynamodb.AttributeValue{
 				"phone_number": {S: aws.String(loginreq.PhoneNumber)},
 			},
-			TableName: aws.String("adviser"),
+			TableName: aws.String("adviser_info"),
 		}
 		reqoutput, loginerr := svc.GetItem(reqinput)
 		if loginerr == nil && reqoutput != nil {
@@ -83,7 +103,7 @@ func (actl *adviser_controller) AdviserHomePage(c *gin.Context) {
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
-		TableName: aws.String("adviser"),
+		TableName: aws.String("adviser_info"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"phone_number": {S: aws.String(claim.PhoneNumber)},
 		},
@@ -100,7 +120,7 @@ func (actl *adviser_controller) AdviserInformationEdit(c *gin.Context) {
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
-		TableName: aws.String("adviser"),
+		TableName: aws.String("adviser_infoW"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"phone_number": {S: aws.String(claim.PhoneNumber)},
 		},

@@ -8,6 +8,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 )
 
+type IdTable struct {
+	Uuid        string `json:"uuid" dynamodbav:"uuid"`
+	Type        string `json:"type" dynamodbav:"type"`
+	PhoneNumber string `json:"phone_number" dynamodbav:"phone_number"`
+}
+
 var Sess *session.Session
 var Svc *dynamodb.DynamoDB
 

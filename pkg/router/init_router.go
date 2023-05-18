@@ -14,6 +14,8 @@ func UserConfigRouter(router *gin.Engine) {
 	router.POST("/user_login", user_controller.UserLogin)
 	router.GET("/user_home_page", user_controller.UserHomePage)
 	router.POST("/user_information_edit", user_controller.UserInformationEdit)
+	router.GET("/adviser_list", user_controller.GetAdviserList)
+	router.POST("/visit_adviser", user_controller.VisitAdviser)
 }
 func AdviserConfigRouter(router *gin.Engine) {
 	adviser_controller := controller.NewAdviserController()

@@ -18,7 +18,8 @@ type UserEdit struct {
 	About  string `json:"about" dynamodbbav:"about"`
 }
 type UserDisEdit struct {
-	Coin int `json:"coin" dynamodbbav:"coin"`
+	Coin int    `json:"coin" dynamodbbav:"coin"`
+	Uuid string `json:"uuid" dynamodbav:"uuid"`
 }
 type UserRequest struct {
 	Loginreq
@@ -37,11 +38,6 @@ type UserRequestUpdate struct {
 	UserEdit
 }
 
-func UserDisEditInit() *UserDisEdit {
-	return &UserDisEdit{
-		Coin: 0,
-	}
-}
 func (uru *UserRequestUpdate) Update(phone_number string) (*dynamodb.UpdateItemOutput, error) {
 	update_item_input := &dynamodb.UpdateItemInput{
 		TableName: aws.String("user"),
