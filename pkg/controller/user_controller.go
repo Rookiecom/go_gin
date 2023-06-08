@@ -2,18 +2,16 @@ package controller
 
 import (
 	"fmt"
+	mydb "gowork/pkg/db"
 	domain "gowork/pkg/domain"
 	myjwt "gowork/pkg/middleware"
 	"gowork/pkg/util"
 	"net/http"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"k8s.io/klog"
 )
 
@@ -24,47 +22,41 @@ type user_controller struct {
 func NewUserController() *user_controller {
 	return &user_controller{}
 }
+
 func (uctl *user_controller) UserRegister(c *gin.Context) {
 	klog.Infof("user register")
-	newuuid, _ := uuid.NewRandom()
-	var userreq domain.UserRequest
+	ok1 := mydb.CreateUserTable()
+	if ok1 != nil {
+		c.String(http.StatusOK, ok1.Error()+"\n")
+		return
+	}
+	ok2 := mydb.CreateIdTable()
+	if ok2 != nil {
+		c.String(http.StatusOK, ok2.Error()+"\n")
+		return
+	}
 	c.String(200, "请填写以下信息完成用户注册\n")
 	c.String(200, "phone_number password name birth gender bio about\n")
-	user_register := domain.UserRegister{
-		UserRequest: userreq,
-		UserDisEdit: *&domain.UserDisEdit{
-			Coin: 0,
-			Uuid: newuuid.String(),
-		},
+	var userreq domain.UserRequest
+	dataok := c.ShouldBindJSON(&userreq)
+	if dataok != nil {
+		c.String(http.StatusOK, "网页传输数据失败")
+		return
 	}
-	c.ShouldBindJSON(&user_register)
-	useritem, _ := dynamodbattribute.MarshalMap(user_register)
-	useriteminput := &dynamodb.PutItemInput{
-		Item:      useritem,
-		TableName: aws.String("user_info"),
-	}
-	svc := domain.Svc
-	_, err := svc.PutItem(useriteminput)
+	err := mydb.UserRegisterDB(&userreq)
 	if err == nil {
 		c.String(http.StatusOK, "注册成功")
 	} else {
 		c.String(http.StatusOK, "注册失败"+err.Error())
 	}
-
-	id_table := domain.IdTable{
-		Uuid:        newuuid.String(),
-		Type:        "user",
-		PhoneNumber: user_register.PhoneNumber,
-	}
-	id_table_item, _ := dynamodbattribute.MarshalMap(id_table)
-	id_table_input := &dynamodb.PutItemInput{
-		Item:      id_table_item,
-		TableName: aws.String("all_id"),
-	}
-	svc.PutItem(id_table_input)
 }
 func (uctl *user_controller) UserLogin(c *gin.Context) {
+
 	klog.Infof("user login for token")
+	_, asd := c.Get(util.GinContextKey)
+	if !asd {
+		fmt.Println("fafadfafdfadssdffafadsfasdfasdfa")
+	}
 	c.String(http.StatusOK, "填写如下信息登录：\nphone_number password name\n")
 	var loginreq domain.Loginreq
 	err := c.ShouldBindJSON(&loginreq)
@@ -79,7 +71,7 @@ func (uctl *user_controller) UserLogin(c *gin.Context) {
 		reqoutput, loginerr := svc.GetItem(reqinput)
 		if loginerr == nil && reqoutput != nil {
 			if *reqoutput.Item["password"].S == loginreq.Password {
-				generateToken(c, "user", loginreq.PhoneNumber, 30)
+				myjwt.GenerateToken(c, "user", loginreq.PhoneNumber, *reqoutput.Item["name"].S, 30)
 			} else {
 				fmt.Println(*reqoutput.Item["password"].S)
 				fmt.Println(loginreq.Password)
@@ -101,6 +93,7 @@ func (uctl *user_controller) UserLogin(c *gin.Context) {
 func (uctl *user_controller) UserHomePage(c *gin.Context) {
 	ClaimsFormContext, _ := c.Get(util.GinContextKey)
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	fmt.Println(claim)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
 		TableName: aws.String("user_info"),
@@ -135,7 +128,7 @@ func (uctl *user_controller) UserInformationEdit(c *gin.Context) {
 	if ok := c.ShouldBindJSON(update_req); ok == nil {
 		fmt.Println(*update_req)
 		if update_req.IsEdit {
-			update_output, err := update_req.Update(claim.PhoneNumber)
+			update_output, err := mydb.UserUpdate(update_req, claim.PhoneNumber)
 
 			if err == nil {
 				var new_inf domain.UserEdit
@@ -169,11 +162,11 @@ func (uctl *user_controller) GetAdviserList(c *gin.Context) {
 }
 func (uctl *user_controller) VisitAdviser(c *gin.Context) {
 	adviserid := c.Query("uuid")
+
 	phonereq := &dynamodb.GetItemInput{
 		TableName: aws.String("all_id"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"uuid": {S: aws.String(adviserid)},
-			"type": {S: aws.String("adviser")},
 		},
 	}
 	svc := domain.Svc
@@ -188,31 +181,179 @@ func (uctl *user_controller) VisitAdviser(c *gin.Context) {
 	var home_page_inf domain.AdviserHomePage
 	dynamodbattribute.UnmarshalMap(reqoutput.Item, &home_page_inf)
 	c.JSON(http.StatusOK, home_page_inf)
-
-}
-func generateToken(c *gin.Context, roleid string, phone_number string, ExpireTimeByMinute int) {
-	j := myjwt.NewJwt()
-
-	claims := myjwt.CustomClaims{
-		Role:        roleid,
-		PhoneNumber: phone_number,
-		StandardClaims: jwt.StandardClaims{
-			NotBefore: int64(time.Now().Unix() - 1000),
-			ExpiresAt: int64(time.Now().Unix() + int64(ExpireTimeByMinute*60)),
-			Issuer:    "rookie",
+	scan_input := &dynamodb.ScanInput{
+		TableName:        aws.String("adviser_comment"),
+		FilterExpression: aws.String("phone_number=:val"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":val": {S: aws.String(*result.Item["phone_number"].S)},
+		},
+		ProjectionExpression: aws.String("commentor,#t,score,content"),
+		ExpressionAttributeNames: map[string]*string{
+			"#t": aws.String("time"),
 		},
 	}
-	token, err := j.CreateToken(claims)
+	scan_output, err := svc.Scan(scan_input)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"status": -1,
-			"msg":    err.Error(),
+			"err": err.Error(),
 		})
+	} else {
+		var comments []domain.CommentDisplay
+		for i := 0; i < int(*scan_output.Count); i++ {
+			var temp domain.CommentDisplay
+			dynamodbattribute.UnmarshalMap(scan_output.Items[i], &temp)
+			comments = append(comments, temp)
+		}
+		c.JSON(http.StatusOK, comments)
+	}
+
+}
+func (uctl *user_controller) HostOrder(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	ok1 := mydb.CreateOrderTable()
+	if ok1 != nil {
+		c.String(http.StatusOK, "failed to create order table\n"+ok1.Error()+"\n")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"status": 0,
-		"msg":    "登录成功",
-		"token":  token,
-	})
+	ok2 := mydb.CreateSelectOrder()
+	if ok2 != nil {
+		c.String(http.StatusOK, "failed to create select order table"+ok2.Error()+"\n")
+	}
+	order := &domain.Order{}
+	order.OrderHost = claim.Name
+
+	c.ShouldBindJSON(order)
+	err := mydb.OrderRegister(order, claim.PhoneNumber)
+	if err != nil {
+		c.String(http.StatusOK, "failed to register order\n"+err.Error())
+	} else {
+		c.String(http.StatusOK, "succeeded to register order\n")
+	}
+}
+func (uctl *user_controller) FinishOrder(c *gin.Context) {
+	ok := mydb.CreateFlowTable()
+	if ok != nil {
+		c.String(http.StatusOK, "failed to create order table\n"+ok.Error()+"\n")
+		return
+	}
+	var data domain.FinishRequest
+	c.ShouldBindJSON(&data)
+	if !data.IsFinish {
+		return
+	}
+	err := mydb.OrderFinish(data.ID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		c.String(http.StatusOK, "succeeded to finish order")
+	}
+}
+func (uctl *user_controller) CommentOrder(c *gin.Context) {
+	comment := domain.CommentRequest{}
+	c.ShouldBindJSON(&comment)
+	err := mydb.OrderComment(&comment)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		c.String(http.StatusOK, "succeeded to comment order")
+	}
+}
+
+func (uctl *user_controller) RewardOrder(c *gin.Context) {
+	reward := domain.RewardRequest{}
+	c.ShouldBindJSON(&reward)
+	err := mydb.OrderReward(&reward)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		c.String(http.StatusOK, "succeeded to reward order")
+	}
+}
+func (uctl *user_controller) CollectAdviser(c *gin.Context) {
+
+	ok := mydb.CreateCollect()
+	if ok != nil {
+		c.String(http.StatusOK, "failed to create collect table\n"+ok.Error()+"\n")
+		return
+	}
+	adviser_id := c.Query("uuid")
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	err := mydb.CollectAdviser(claim.PhoneNumber, adviser_id)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		c.String(http.StatusOK, "succeeded to collect "+adviser_id)
+	}
+}
+func (uctl *user_controller) GetCollectList(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	svc := domain.Svc
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String("user_collect_adviser"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"phone_number": {S: aws.String(claim.PhoneNumber)},
+		},
+	}
+	output, err := svc.GetItem(input)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		var advisrelist []string
+		dynamodbattribute.Unmarshal(output.Item["adviser_list"], &advisrelist)
+		c.JSON(http.StatusOK, advisrelist)
+	}
+}
+
+func (uctl *user_controller) UserGetFlow(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claims := ClaimsFormContext.(*myjwt.CustomClaims)
+	page_request := &domain.Pagination{}
+	c.ShouldBindJSON(page_request)
+	query_output, err := mydb.GetFlow(claims.PhoneNumber, page_request)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		var output []domain.FlowOutput
+		for i := 0; i < int(*query_output.Count); i++ {
+			var flow domain.FlowOutput
+			dynamodbattribute.UnmarshalMap(query_output.Items[i], &flow)
+			output = append(output, flow)
+		}
+		c.JSON(http.StatusOK, output)
+	}
+}
+
+func (uctl *user_controller) CommentAdviser(c *gin.Context) {
+	ok := mydb.CreateAdviserCommentTable()
+	if ok != nil {
+		c.String(http.StatusOK, "failed to create adviser_comment table\n"+ok.Error()+"\n")
+		return
+	}
+	comment_request := &domain.AdviserCommentRequeat{}
+	c.ShouldBindJSON(comment_request)
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claims := ClaimsFormContext.(*myjwt.CustomClaims)
+	err := mydb.CommentAdviser(claims.PhoneNumber, comment_request)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		c.String(http.StatusOK, "succeeded to comment "+comment_request.AdviserId)
+	}
 }

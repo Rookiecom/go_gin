@@ -2,7 +2,8 @@ package controller
 
 import (
 	"fmt"
-	"gowork/pkg/domain"
+	mydb "gowork/pkg/db"
+	domain "gowork/pkg/domain"
 	myjwt "gowork/pkg/middleware"
 	"gowork/pkg/util"
 	"net/http"
@@ -11,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"k8s.io/klog"
 )
 
@@ -23,45 +23,26 @@ func NewAdviserController() *adviser_controller {
 }
 func (actl *adviser_controller) AdviserRegister(c *gin.Context) {
 	klog.Infof("adviser register")
-	newuuid, _ := uuid.NewRandom()
+	ok1 := mydb.CreateAdviserTable()
+	if ok1 != nil {
+		c.String(http.StatusOK, ok1.Error()+"\n")
+		return
+	}
+	ok2 := mydb.CreateIdTable()
+	if ok2 != nil {
+		c.String(http.StatusOK, ok2.Error()+"\n")
+		return
+	}
 	c.String(http.StatusOK, "请输入以下信息完成顾问注册\n"+
 		"phone_number password name  coin workstate ordernum score commentnum\n")
 	var adviser_request domain.AdviserRequest
 	c.ShouldBindJSON(&adviser_request)
-	adviser_register := domain.AdviserRegister{
-		AdviserRequest: adviser_request,
-		AdviserDisEdit: domain.AdviserDisEdit{
-			Coin:       0,
-			OrderNum:   0,
-			Score:      0,
-			CommentNum: 0,
-			Uuid:       newuuid.String(),
-		},
-	}
-	adviser_item, _ := dynamodbattribute.MarshalMap(adviser_register)
-	adviser_item_input := &dynamodb.PutItemInput{
-		Item:      adviser_item,
-		TableName: aws.String("adviser_info"),
-	}
-	svc := domain.Svc
-	_, err := svc.PutItem(adviser_item_input)
+	err := mydb.AdviserRegisterDB(&adviser_request)
 	if err == nil {
 		c.String(http.StatusOK, "注册成功")
 	} else {
 		c.String(http.StatusOK, "注册失败"+err.Error())
 	}
-
-	id_table := domain.IdTable{
-		Uuid:        newuuid.String(),
-		Type:        "adviser",
-		PhoneNumber: adviser_request.PhoneNumber,
-	}
-	id_table_item, _ := dynamodbattribute.MarshalMap(id_table)
-	id_table_input := &dynamodb.PutItemInput{
-		Item:      id_table_item,
-		TableName: aws.String("all_id"),
-	}
-	svc.PutItem(id_table_input)
 }
 func (actl *adviser_controller) AdviserLogin(c *gin.Context) {
 	klog.Infof("adviser login for token")
@@ -79,7 +60,7 @@ func (actl *adviser_controller) AdviserLogin(c *gin.Context) {
 		reqoutput, loginerr := svc.GetItem(reqinput)
 		if loginerr == nil && reqoutput != nil {
 			if *reqoutput.Item["password"].S == loginreq.Password {
-				generateToken(c, "adviser", loginreq.PhoneNumber, 30)
+				myjwt.GenerateToken(c, "adviser", loginreq.PhoneNumber, *reqoutput.Item["name"].S, 30)
 			} else {
 				fmt.Println(*reqoutput.Item["password"].S)
 				fmt.Println(loginreq.Password)
@@ -109,18 +90,41 @@ func (actl *adviser_controller) AdviserHomePage(c *gin.Context) {
 		},
 	}
 	reqoutput, _ := svc.GetItem(reqinput)
-	fmt.Println(reqoutput)
 	var home_page_inf domain.AdviserHomePage
 	dynamodbattribute.UnmarshalMap(reqoutput.Item, &home_page_inf)
-	fmt.Println(home_page_inf)
 	c.JSON(http.StatusOK, home_page_inf)
+	scan_input := &dynamodb.ScanInput{
+		TableName:        aws.String("adviser_comment"),
+		FilterExpression: aws.String("phone_number=:val"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":val": {S: aws.String(claim.PhoneNumber)},
+		},
+		ProjectionExpression: aws.String("commentor,#t,score,content"),
+		ExpressionAttributeNames: map[string]*string{
+			"#t": aws.String("time"),
+		},
+	}
+	scan_output, err := svc.Scan(scan_input)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"err": err.Error(),
+		})
+	} else {
+		var comments []domain.CommentDisplay
+		for i := 0; i < int(*scan_output.Count); i++ {
+			var temp domain.CommentDisplay
+			dynamodbattribute.UnmarshalMap(scan_output.Items[i], &temp)
+			comments = append(comments, temp)
+		}
+		c.JSON(http.StatusOK, comments)
+	}
 }
 func (actl *adviser_controller) AdviserInformationEdit(c *gin.Context) {
 	ClaimsFormContext, _ := c.Get(util.GinContextKey)
 	claim := ClaimsFormContext.(*myjwt.CustomClaims)
 	svc := domain.Svc
 	reqinput := &dynamodb.GetItemInput{
-		TableName: aws.String("adviser_infoW"),
+		TableName: aws.String("adviser_info"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"phone_number": {S: aws.String(claim.PhoneNumber)},
 		},
@@ -135,10 +139,8 @@ func (actl *adviser_controller) AdviserInformationEdit(c *gin.Context) {
 		AdviserEdit: inf,
 	}
 	if ok := c.ShouldBindJSON(update_req); ok == nil {
-		fmt.Println(*update_req)
 		if update_req.IsEdit {
-			update_output, err := update_req.Update(claim.PhoneNumber)
-
+			update_output, err := mydb.AdviserUpdate(update_req, claim.PhoneNumber)
 			if err == nil {
 				var new_inf domain.AdviserEdit
 				dynamodbattribute.UnmarshalMap(update_output.Attributes, &new_inf)
@@ -153,5 +155,35 @@ func (actl *adviser_controller) AdviserInformationEdit(c *gin.Context) {
 
 	} else {
 		c.String(http.StatusOK, ok.Error())
+	}
+}
+func (actl *adviser_controller) TakeOrder(c *gin.Context) {
+	klog.Info("adviser token order")
+	orderid := c.Query("id")
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claim := ClaimsFormContext.(*myjwt.CustomClaims)
+	err := mydb.OrderTake(orderid, claim.Name, claim.PhoneNumber)
+	if err != nil {
+		c.String(http.StatusOK, err.Error())
+	} else {
+		c.String(http.StatusOK, "succeeded to take order\n")
+	}
+}
+func (actl *adviser_controller) AdviserGetFlow(c *gin.Context) {
+	ClaimsFormContext, _ := c.Get(util.GinContextKey)
+	claims := ClaimsFormContext.(*myjwt.CustomClaims)
+	page_request := &domain.Pagination{}
+	c.ShouldBindJSON(page_request)
+	query_output, err := mydb.GetFlow(claims.PhoneNumber, page_request)
+	if err != nil {
+		c.String(http.StatusOK, "fail to get coin flow")
+	} else {
+		var output []domain.FlowOutput
+		for i := 0; i < int(*query_output.Count); i++ {
+			var flow domain.FlowOutput
+			dynamodbattribute.UnmarshalMap(query_output.Items[i], &flow)
+			output = append(output, flow)
+		}
+		c.JSON(http.StatusOK, output)
 	}
 }

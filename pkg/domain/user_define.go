@@ -1,10 +1,5 @@
 package domain
 
-import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-)
-
 type Loginreq struct {
 	PhoneNumber string `json:"phone_number" dynamodbbav:"phone_number" `
 	Password    string `json:"password" dynamodbbav:"password"`
@@ -37,40 +32,15 @@ type UserRequestUpdate struct {
 	IsEdit bool `json:"is_edit" dynamodbbav:"is_edit"`
 	UserEdit
 }
-
-func (uru *UserRequestUpdate) Update(phone_number string) (*dynamodb.UpdateItemOutput, error) {
-	update_item_input := &dynamodb.UpdateItemInput{
-		TableName: aws.String("user"),
-		Key: map[string]*dynamodb.AttributeValue{
-			"phone_number": {S: aws.String(phone_number)},
-		},
-		UpdateExpression: aws.String("SET #na=:name,#bir=:birth,#gen=:gender,#bio=:bio,#ab=:about"),
-		ExpressionAttributeNames: map[string]*string{
-			"#ab":  aws.String("about"),
-			"#bio": aws.String("bio"),
-			"#bir": aws.String("birth"),
-			"#gen": aws.String("gender"),
-			"#na":  aws.String("name"),
-		},
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":name": {
-				S: aws.String(uru.Name),
-			},
-			":birth": {
-				S: aws.String(uru.Birth),
-			},
-			":bio": {
-				S: aws.String(uru.Bio),
-			},
-			":gender": {
-				S: aws.String(uru.Gender),
-			},
-			":about": {
-				S: aws.String(uru.About),
-			},
-		},
-		ReturnValues: aws.String("ALL_NEW"),
-	}
-	return Svc.UpdateItem(update_item_input)
-
+type AdviserCommentRequeat struct {
+	AdviserId string `json:"adviser_id" dynamodbav:"adviser_id"`
+	Content   string `json:"content" dynaomdodbav:"content"`
+	Score     int    `json:"score" dynamodbav:"score"`
+}
+type AdviserComment struct {
+	PhoneNumber string  `json:"phone_number" dynamodbav:"phone_number"`
+	Content     string  `json:"content" dynaomdodbav:"content"`
+	Score       float64 `json:"score" dynamodbav:"score"`
+	Time        string  `json:"time" dynamodbav:"time"`
+	Commentor   string  `json:"commentor" dynamodbav:"commentor"`
 }
